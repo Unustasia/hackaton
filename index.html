@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Ujin Fullstack Production Ready MVP</title>
+    <style>
+        :root { --bg: #121212; --widget: #1e1e1e; --text: #fff; --accent: #FFB74D; }
+        .theme-light { --bg: #f5f5f5; --widget: #fff; --text: #333; --accent: #1976D2; }
+        body { margin: 0; font-family: system-ui, sans-serif; background: #1c1c1e; color: #fff; display: flex; height: 100vh; overflow: hidden; }
+        .preview-area { flex: 1; display: flex; justify-content: center; align-items: center; background: #000; padding: 10px; }
+        #display { width: 360px; height: 640px; background: var(--bg); color: var(--text); border-radius: 16px; border: 4px solid #3a3a3c; display: flex; flex-direction: column; overflow: hidden; transition: all 0.2s; }
+        
+        /* ТЗ: Адаптивная динамическая полоса ЧС */
+        #emergency-bar { background: #CC0000; color: #fff; font-weight: bold; text-align: center; display: none; justify-content: center; align-items: center; font-size: 1.1rem; padding: 5px; box-sizing: border-box; }
+        
+        #content { flex: 1; display: flex; flex-direction: column; padding: 15px; justify-content: space-between; }
+        .grid { display: grid; grid-template-columns: 1fr; gap: 10px; }
+        .widget { background: var(--widget); border-radius: 10px; padding: 12px; border: 1px solid #2d2d2d; }
+        .uk-panel { width: 420px; background: #2c2c2e; padding: 20px; box-sizing: border-box; display: flex; flex-direction: column; gap: 15px; overflow-y: auto; }
+        input, select, textarea, button { width: 100%; padding: 8px; background: #3a3a3c; border: 1px solid #48484a; border-radius: 6px; color: #fff; box-sizing: border-box; }
+        button { background: #0a84ff; font-weight: bold; cursor: pointer; border: none; }
+        button.danger { background: #ff453a; }
+    </style>
+</head>
+<body>
+
+    <div class="preview-area">
+        <div id="display">
+            <div id="emergency-bar"></div>
+            <div id="content">
+                <div style="text-align: center;">
+                    <h4 style="margin:0">Инфо-Центр ЖК</h4>
+                    <small style="color:gray">main_hall_01</small>
+                </div>
+                <div id="widgets-grid" class="grid">
+                    <div class="widget">
+                        <div style="color:var(--accent); font-weight:bold">📢 НОВОСТИ</div>
+                        <div id="news">Подключение...</div>
+                    </div>
+                    <div class="widget">
+                        <div style="color:var(--accent); font-weight:bold">🚗 ПАРКОВКА</div>
+                        <div id="infra">Загрузка...</div>
+                    </div>
+                    <!-- БОНУСНАЯ ФИЧА: Видеопоток с общедомовой камеры -->
+                    <div class="widget">
+                        <div style="color:var(--accent); font-weight:bold">📹 КАМЕРА: ДЕТСКАЯ ПЛОЩАДКА</div>
+                        <div style="width:100%; height:80px; background:#000; margin-top:5px; border-radius:6px; display:flex; justify-content:center; align-items:center; font-size:0.8rem; color:green">
+                            ● LIVE STREAMING
+                        </div>
+                    </div>
+                </div>
+                <div style="text-align:center; font-size:0.7rem; color:gray">Вся настройка выполняется в ЛК УК</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="uk-panel">
+        <h3 style="margin:0">Панель Управления УК</h3>
+        
+        <div>
+            <label style="font-size:0.8rem; color:gray">Токен авторизации Ujin (Bearer):</label>
+            <input type="text" id="token-input" value="ustr-my-secret-hackathon-token-2026">
+        </div>
+
+        <hr style="border-color:#3a3a3c">
+
+        <h4>🎨 Шаблон и Сетка виджетов</h4>
+        <select id="theme" onchange="document.getElementById('display').className = this.value === 'light' ? 'theme-light' : ''">
+            <option value="dark">Тема: Ujin Dark</option>
+            <option value="light">Тема: Контрастная Светлая</option>
+        </select>
+        <select id="grid" onchange="document.getElementById('widgets-grid').style.gridTemplateColumns = this.value === '2' ? '1fr 1fr' : '1fr'">
+            <option value="1">Сетка: 1 колонка (Вертикальная)</option>
+            <option value="2">Сетка: 2 колонки (Компактная)</option>
+        </select>
+
+        <hr style="border-color:#3a3a3c">
+
+        <h4>🚨 Адресное управление ЧС</h4>
+        <select id="target-type">
+            <option value="single">Один экран (ID: main_hall_01)</option>
+            <option value="group">Группа экранов (Подъезд 1)</option>
+            <option value="all">Все экраны жилого комплекса</option>
+        </select>
+        <textarea id="msg" rows="2">ВНИМАНИЕ! Пожарная тревога в первом подъезде! Срочно эвакуируйтесь!</textarea>
+        <button class="danger" onclick="triggerEmergency()">ВКЛЮЧИТЬ РЕЖИМ ЧС</button>
+    </div>
+
+    <script>
+        const ws = new WebSocket("ws://127.0.0.1:8000/ws/display/main_hall_01");
+        
+        ws.onmessage = function(e) {
+            const data = JSON.parse(e.data);
+            const bar = document.getElementById('emergency-bar');
+            
+            if (data.event === "EMERGENCY_ACTIVATE") {
+                bar.innerText = data.text;
+                bar.style.display = "flex";
+                // ТЗ Стр 5: Если текст длинный (>45 символов) — полоса 10% высоты экрана (64px), иначе 5% (32px)
+                bar.style.height = data.text.length > 45 ? "64px" : "32px";
+            }
+            if (data.event === "EMERGENCY_RESET" || data.event === "NORMAL_MODE") {
+                bar.style.display = "none";
+            }
+            if (data.event === "DATA_UPDATE") {
+                document.getElementById('news').innerHTML = data.data.ujin_news.map(n => `<strong>${n.title}</strong><br><small>${n.text}</small>`).join('');
+                document.getElementById('infra').innerHTML = `Мест: <strong>${data.data.ujin_infrastructure.free_parking_spots}</strong> | Кладовых: <strong>${data.data.ujin_infrastructure.free_storages}</strong>`;
+            }
+        };
+
+        async function triggerEmergency() {
+            const token = document.getElementById('token-input').value;
+            const targetType = document.getElementById('target-type').value;
+            const timeout = document.getElementById('timeout-input').value;
+            
+            let targetId = "main_hall_01";
+            if (targetType === "group") targetId = "entrance_1";
+            if (targetType === "all") targetId = "all";
+
+            console.log("Отправка сигнала ЧС...");
+
+            try {
+                // Шлём запрос строго на тот же домен, где открыт сайт
+                const response = await fetch('/api/v1/uk/emergency/activate', {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        target_type: targetType,
+                        target_id: targetId,
+                        emergency_text: document.getElementById('msg').value,
+                        timeout_seconds: parseInt(timeout)
+                    })
+                });
+                
+                const resData = await response.json();
+                console.log("Ответ сервера:", resData);
+            } catch (err) {
+                console.error("Ошибка при отправке ЧС:", err);
+            }
+        }
+
+    </script>
+</body>
+</html>

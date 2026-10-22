@@ -1,0 +1,13 @@
+{
+  "ujin_news": [
+    {
+      "title": "Внимание: Сервер Ujin недоступен",
+      "text": "Отображаются локальные сохраненные новости. Скоро всё починим.",
+      "date": "2026-10-22"
+    }
+  ],
+  "ujin_infrastructure": {
+    "free_parking_spots": 0,
+    "free_storages": 0
+  }
+}

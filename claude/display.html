@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Дисплей ЖК</title>
+<style>
+  :root { --bg:#121212; --widget:#1e1e1e; --text:#fff; --accent:#FFB74D; --muted:#9a9a9a; --bar-h:0vh; }
+  .light { --bg:#f5f5f5; --widget:#fff; --text:#222; --accent:#1976D2; --muted:#666; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; height:100%; overflow:hidden; background:var(--bg); color:var(--text);
+               font-family:system-ui,sans-serif; font-size:min(3.2vw,1.8vh); cursor:none; user-select:none; }
+  /* Полоса ЧС: 5% или 10% высоты экрана */
+  #bar { display:none; height:var(--bar-h); background:#CC0000; color:#fff; font-weight:800; text-align:center;
+         align-items:center; justify-content:center; padding:0 2vw; overflow:hidden; }
+  #bar.one { white-space:nowrap; } #bar.two { line-height:1.1; }
+  #app { height:calc(100vh - var(--bar-h)); overflow:hidden; }
+  #inner { transform-origin:top left; padding:2.5vh 4vw; display:flex; flex-direction:column; gap:2vh; }
+  .head { display:flex; justify-content:space-between; align-items:baseline; }
+  .clock { font-size:3.2rem; font-weight:700; } .date { color:var(--muted); font-size:1.2rem; }
+  .grid { display:grid; gap:2vh 2vw; }
+  .w { background:var(--widget); border-radius:1.2rem; padding:1.2rem 1.4rem; border:1px solid rgba(128,128,128,.25); }
+  .w h2 { margin:0 0 .6rem; font-size:1.3rem; color:var(--accent); text-transform:uppercase; letter-spacing:.05em; }
+  .news-item { margin-bottom:.9rem; } .news-item b { font-size:1.5rem; display:block; }
+  .news-item span { font-size:1.2rem; } .news-item small { color:var(--muted); font-size:1rem; }
+  .nums { display:flex; gap:2rem; } .num { font-size:3.6rem; font-weight:800; line-height:1; }
+  .num small { display:block; font-size:1.1rem; color:var(--muted); font-weight:400; margin-top:.3rem; }
+  .txt { white-space:pre-line; font-size:1.3rem; line-height:1.4; }
+  .cam { width:100%; aspect-ratio:16/9; background:#000; border-radius:.6rem; object-fit:cover; display:flex;
+         align-items:center; justify-content:center; color:#777; }
+</style>
+</head>
+<body>
+<div id="bar"></div>
+<div id="app"><div id="inner"></div></div>
+<script>
+const params = new URLSearchParams(location.search);
+const previewId = params.get('preview');
+const displayId = location.pathname.split('/').pop();
+const root = document.documentElement, bar = document.getElementById('bar');
+const inner = document.getElementById('inner'), app = document.getElementById('app');
+let state = null;
+
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+
+const widgets = {
+  clock: () => '',  // часы в шапке
+  news: s => `<div class="w"><h2>📢 Новости УК</h2>${
+      (s.data.ujin_news || []).map(n => `<div class="news-item"><b>${esc(n.title)}</b><span>${esc(n.text)}</span><br><small>${esc(n.date)}</small></div>`).join('')
+      || '<span class="txt">Новостей нет</span>'}</div>`,
+  parking: s => { const i = s.data.ujin_infrastructure || {};
+    return `<div class="w"><h2>🚗 Свободно</h2><div class="nums">
+      <div class="num">${esc(i.free_parking_spots)}<small>парковочных мест</small></div>
+      <div class="num">${esc(i.free_storages)}<small>кладовых</small></div></div></div>`; },
+  camera: s => `<div class="w"><h2>📹 Камера</h2>${s.data.camera_url
+      ? `<img class="cam" src="${esc(s.data.camera_url)}">` : '<div class="cam">Нет сигнала</div>'}</div>`,
+};
+['rules', 'trash', 'contacts'].forEach(k => widgets[k] = s => {
+  const c = (s.static || {})[k]; return c ? `<div class="w"><h2>${esc(c.title)}</h2><div class="txt">${esc(c.body)}</div></div>` : '';
+});
+
+function clockText() {
+  const d = new Date();
+  return [d.toLocaleTimeString('ru-RU', {hour:'2-digit', minute:'2-digit'}),
+          d.toLocaleDateString('ru-RU', {weekday:'long', day:'numeric', month:'long'})];
+}
+function tickClock() {
+  const el = document.getElementById('clk'); if (!el) return;
+  const [t, d] = clockText(); el.querySelector('.clock').textContent = t; el.querySelector('.date').textContent = d;
+}
+
+// Масштабируем содержимое, чтобы оно целиком влезало в оставшуюся высоту (скролла нет)
+function fit() {
+  inner.style.transform = 'none'; inner.style.width = '100%';
+  const k = Math.min(1, app.clientHeight / inner.scrollHeight);
+  inner.style.transform = `scale(${k})`; inner.style.width = (100 / k) + '%';
+}
+
+function applyEmergency(text) {
+  if (!text) { bar.style.display = 'none'; root.style.setProperty('--bar-h', '0vh'); return fit(); }
+  bar.textContent = text; bar.style.display = 'flex';
+  bar.className = 'one'; root.style.setProperty('--bar-h', '5vh'); bar.style.fontSize = '3.2vh';
+  if (bar.scrollWidth > bar.clientWidth) {            // не влезло в одну строку -> 10% и две строки
+    bar.className = 'two'; root.style.setProperty('--bar-h', '10vh');
+    let fs = 3.6; bar.style.fontSize = fs + 'vh';
+    while (bar.scrollHeight > bar.clientHeight && fs > 1.6) { fs -= 0.2; bar.style.fontSize = fs + 'vh'; }
+  }
+  fit();
+}
+
+function render(s) {
+  state = s;
+  const t = s.template;
+  document.body.className = t.theme === 'light' ? 'light' : '';
+  const [time, date] = clockText();
+  const cols = Math.max(1, Math.min(3, t.columns_count || 1));
+  inner.innerHTML = `<div class="head" id="clk"><span class="clock">${time}</span><span class="date">${date}</span></div>
+    <div class="grid" style="grid-template-columns:repeat(${cols},1fr)">${
+      t.widgets.map(w => (widgets[w] ? widgets[w](s) : '')).join('')}</div>`;
+  applyEmergency(s.emergency);
+}
+
+setInterval(tickClock, 1000);
+addEventListener('resize', () => state && applyEmergency(state.emergency));
+
+if (previewId) {                                   // режим предпросмотра: без WS, без ЧС
+  fetch('/api/v1/public/preview/' + previewId).then(r => r.json()).then(render);
+} else {
+  (function connect() {
+    const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws/display/' + displayId);
+    ws.onmessage = e => { const m = JSON.parse(e.data); if (m.event === 'STATE') render(m); };
+    ws.onclose = () => setTimeout(connect, 3000);  // авто-переподключение
+  })();
+}
+</script>
+</body>
+</html>

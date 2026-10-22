@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="ru"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Панель управления УК</title>
+<style>
+  :root { --bg:#1c1c1e; --card:#2c2c2e; --line:#48484a; --blue:#0a84ff; --red:#ff453a; --green:#30d158; --muted:#9a9a9e; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:#fff; font-family:system-ui,sans-serif; }
+  header { display:flex; gap:16px; align-items:center; padding:12px 24px; background:var(--card); position:sticky; top:0; z-index:5; flex-wrap:wrap; }
+  header h1 { margin:0; font-size:1.2rem; flex:1; }
+  main { display:grid; grid-template-columns:repeat(auto-fit,minmax(380px,1fr)); gap:16px; padding:16px 24px; }
+  section { background:var(--card); border-radius:12px; padding:16px; }
+  h2 { margin:0 0 12px; font-size:1rem; }
+  input, select, textarea, button { padding:8px 10px; background:#3a3a3c; border:1px solid var(--line); border-radius:8px; color:#fff; font:inherit; }
+  textarea, input[type=text], input[type=password], select { width:100%; margin-bottom:8px; }
+  button { background:var(--blue); border:none; font-weight:600; cursor:pointer; } button.red { background:var(--red); } button.gray { background:#58585a; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; } .row > * { flex:1; }
+  table { width:100%; border-collapse:collapse; font-size:.9rem; } td, th { padding:6px 4px; border-bottom:1px solid var(--line); text-align:left; }
+  .dot { display:inline-block; width:10px; height:10px; border-radius:50%; background:#666; margin-right:6px; } .dot.on { background:var(--green); }
+  .badge { background:var(--red); border-radius:6px; padding:1px 6px; font-size:.75rem; }
+  .tpl { padding:8px; border-radius:8px; cursor:pointer; border:1px solid var(--line); margin-bottom:6px; } .tpl.sel { border-color:var(--blue); }
+  label.chk { display:inline-flex; align-items:center; gap:4px; margin:0 10px 6px 0; font-size:.9rem; } label.chk input { width:auto; margin:0; }
+  small, .muted { color:var(--muted); } #audit { font-size:.78rem; max-height:180px; overflow:auto; }
+  #toast { position:fixed; bottom:20px; right:20px; background:#000; padding:10px 16px; border-radius:8px; display:none; }
+</style></head>
+<body>
+<header>
+  <h1>Ujin · Панель управления дисплеями</h1>
+  <input id="token" type="password" placeholder="Токен УК (Bearer)" style="width:240px;margin:0">
+  <select id="tmode" style="width:200px;margin:0">
+    <option value="list">Адресат: выбранные экраны</option><option value="group">Адресат: группа</option><option value="all">Адресат: все экраны</option>
+  </select>
+  <select id="tgroup" style="width:160px;margin:0;display:none"></select>
+</header>
+<main>
+  <section>
+    <h2>🖥 Экраны</h2>
+    <table><thead><tr><th></th><th>Экран</th><th>Группа</th><th>Шаблон</th></tr></thead><tbody id="screens"></tbody></table>
+    <p class="muted"><small>Открыть дисплей: <code>/display/&lt;id&gt;</code> (Android TV / WebView)</small></p>
+  </section>
+
+  <section>
+    <h2>🎨 Шаблоны</h2>
+    <div id="tpls"></div>
+    <input id="t-name" type="text" placeholder="Название шаблона">
+    <div class="row"><select id="t-cols"><option value="1">1 колонка</option><option value="2">2 колонки</option><option value="3">3 колонки</option></select>
+    <select id="t-theme"><option value="dark">Тёмная тема</option><option value="light">Светлая тема</option></select></div>
+    <div id="t-widgets" style="margin:8px 0"></div>
+    <div class="row"><button onclick="saveTpl()">Сохранить</button><button class="gray" onclick="newTpl()">Новый</button>
+    <button class="gray" onclick="previewTpl()">Предпросмотр</button><button class="red" onclick="delTpl()">Удалить</button></div>
+    <button style="width:100%;margin-top:8px" onclick="sendTpl()">📤 Отправить шаблон на адресатов</button>
+  </section>
+
+  <section>
+    <h2>🚨 Режим ЧС</h2>
+    <textarea id="em-text" rows="3" maxlength="300" placeholder="Текст сообщения">ВНИМАНИЕ! Задымление в холле третьего подъезда!</textarea>
+    <div class="row" style="margin-bottom:8px"><label class="muted" style="flex:2">Автосброс через (мин, 0 — без):</label><input id="em-timeout" type="number" min="0" value="30"></div>
+    <div class="row"><button class="red" onclick="emergency(true)">Активировать режим ЧС</button><button class="gray" onclick="emergency(false)">Сбросить режим ЧС</button></div>
+    <p class="muted"><small>Новое сообщение заменяет предыдущее на выбранных экранах.</small></p>
+  </section>
+
+  <section>
+    <h2>📌 Постоянная информация</h2>
+    <div id="static"></div>
+  </section>
+
+  <section style="grid-column:1/-1"><h2>🧾 Аудит (последние действия)</h2><div id="audit"></div></section>
+</main>
+<div id="toast"></div>
+<script>
+const WIDGETS = {clock:'Часы', news:'Новости', parking:'Парковки/кладовые', rules:'Правила ЖК', trash:'Вывоз мусора', contacts:'Аварийные службы', camera:'Камера'};
+let D = {displays:[], templates:[], static:[], audit:[]}, selScreens = new Set(), selTpl = null;
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+$('token').value = localStorage.getItem('uk_token') || '';
+$('token').onchange = () => { localStorage.setItem('uk_token', $('token').value); load(); };
+
+function toast(m) { const t = $('toast'); t.textContent = m; t.style.display = 'block'; setTimeout(() => t.style.display = 'none', 2500); }
+async function api(method, path, body) {
+  const h = {'Content-Type':'application/json'}; if ($('token').value) h.Authorization = 'Bearer ' + $('token').value;
+  const r = await fetch(path, {method, headers:h, body: body ? JSON.stringify(body) : undefined});
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { toast('Ошибка: ' + (j.detail || r.status)); throw new Error(j.detail); }
+  return j;
+}
+function target() {
+  const m = $('tmode').value;
+  if (m === 'all') return {target_type:'all', target_id:''};
+  if (m === 'group') return {target_type:'group', target_id:$('tgroup').value};
+  if (!selScreens.size) { toast('Отметьте экраны в списке'); throw new Error('no targets'); }
+  return {target_type:'list', target_id:[...selScreens].join(',')};
+}
+$('tmode').onchange = () => $('tgroup').style.display = $('tmode').value === 'group' ? '' : 'none';
+
+async function load() {
+  D = await api('GET', '/api/v1/uk/dashboard');
+  const groups = [...new Set(D.displays.map(d => d.group_name))];
+  const cur = $('tgroup').value; $('tgroup').innerHTML = groups.map(g => `<option>${esc(g)}</option>`).join(''); if (cur) $('tgroup').value = cur;
+  $('screens').innerHTML = D.displays.map(d => `<tr>
+    <td><input type="checkbox" ${selScreens.has(d.id) ? 'checked' : ''} onchange="togScreen('${d.id}',this.checked)"></td>
+    <td><span class="dot ${d.online ? 'on' : ''}"></span>${esc(d.location)}<br><small>${esc(d.id)}</small>
+        ${d.is_emergency && d.emergency_text ? ' <span class="badge">ЧС</span>' : ''}</td>
+    <td>${esc(d.group_name)}</td><td>${esc((D.templates.find(t => t.id === d.template_id) || {}).name || '—')}</td></tr>`).join('');
+  $('tpls').innerHTML = D.templates.map(t => `<div class="tpl ${t.id === selTpl ? 'sel' : ''}" onclick="pickTpl(${t.id})">${esc(t.name)} <small>· ${t.columns_count} кол. · ${t.theme}</small></div>`).join('');
+  $('t-widgets').innerHTML = Object.entries(WIDGETS).map(([k, v]) => `<label class="chk"><input type="checkbox" value="${k}">${v}</label>`).join('');
+  fillTpl();
+  $('static').innerHTML = D.static.map(s => `<b>${esc(s.title)}</b><textarea id="st-${s.key}" rows="3">${esc(s.body)}</textarea>
+    <button onclick="saveStatic('${s.key}')" style="margin-bottom:12px">Сохранить</button>`).join('');
+  $('audit').innerHTML = D.audit.map(a => `<div>${esc(a.ts)} · ${esc(a.actor)} · <b>${esc(a.action)}</b> → ${esc(a.targets)} ${esc(a.text)}</div>`).join('') || '—';
+}
+function togScreen(id, on) { on ? selScreens.add(id) : selScreens.delete(id); }
+
+function pickTpl(id) { selTpl = id; load(); }
+function fillTpl() {
+  const t = D.templates.find(x => x.id === selTpl);
+  $('t-name').value = t ? t.name : ''; $('t-cols').value = t ? t.columns_count : 1; $('t-theme').value = t ? t.theme : 'dark';
+  document.querySelectorAll('#t-widgets input').forEach(c => c.checked = t ? t.widgets.includes(c.value) : ['clock','news','parking'].includes(c.value));
+}
+function newTpl() { selTpl = null; load(); }
+async function saveTpl() {
+  const body = {name:$('t-name').value || 'Без названия', columns_count:+$('t-cols').value, theme:$('t-theme').value,
+                widgets:[...document.querySelectorAll('#t-widgets input:checked')].map(c => c.value)};
+  if (selTpl) await api('PUT', '/api/v1/uk/templates/' + selTpl, body); else selTpl = (await api('POST', '/api/v1/uk/templates', body)).id;
+  toast('Шаблон сохранён'); load();
+}
+async function delTpl() { if (!selTpl || !confirm('Удалить шаблон?')) return; await api('DELETE', '/api/v1/uk/templates/' + selTpl); selTpl = null; toast('Удалён'); load(); }
+function previewTpl() { if (!selTpl) return toast('Выберите шаблон (сохраните его перед предпросмотром)'); window.open('/preview?tpl=' + selTpl, '_blank', 'width=460,height=860'); }
+async function sendTpl() { if (!selTpl) return toast('Выберите шаблон'); const r = await api('POST', '/api/v1/uk/screens/assign', {...target(), template_id:selTpl}); toast('Отправлено: ' + r.targets.length + ' экр.'); load(); }
+
+async function emergency(on) {
+  if (on && !$('em-text').value.trim()) return toast('Введите текст');
+  const r = on ? await api('POST', '/api/v1/uk/emergency/activate', {...target(), emergency_text:$('em-text').value, timeout_minutes:+$('em-timeout').value})
+               : await api('POST', '/api/v1/uk/emergency/reset', target());
+  toast((on ? 'ЧС активирован: ' : 'ЧС сброшен: ') + r.targets.length + ' экр.'); load();
+}
+async function saveStatic(k) { await api('PUT', '/api/v1/uk/static/' + k, {body:$('st-' + k).value}); toast('Сохранено'); load(); }
+
+load(); setInterval(load, 10000);
+</script></body></html>
