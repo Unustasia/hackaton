@@ -34,8 +34,10 @@
 <main>
   <section>
     <h2>🖥 Экраны</h2>
-    <table><thead><tr><th></th><th>Экран</th><th>Группа</th><th>Шаблон</th></tr></thead><tbody id="screens"></tbody></table>
-    <p class="muted"><small>Открыть дисплей: <code>/display/&lt;id&gt;</code> (Android TV / WebView)</small></p>
+    <table><thead><tr><th></th><th>Экран</th><th>Группа</th><th>Шаблон</th><th></th></tr></thead><tbody id="screens"></tbody></table>
+    <div class="row" style="margin-top:10px"><input id="sc-id" type="text" placeholder="ID (латиницей)" style="margin:0"><input id="sc-loc" type="text" placeholder="Расположение" style="margin:0"><input id="sc-group" type="text" placeholder="Группа (entrance_1)" style="margin:0"></div>
+    <button style="width:100%;margin-top:8px" onclick="addScreen()">+ Добавить экран</button>
+    <p class="muted"><small>Адрес для дисплея: <code>/display/&lt;id&gt;</code> (Android TV / WebView). Новый ID, открытый на экране, добавится в список сам.</small></p>
   </section>
 
   <section>
@@ -43,7 +45,7 @@
     <div id="tpls"></div>
     <input id="t-name" type="text" placeholder="Название шаблона">
     <div class="row"><select id="t-cols"><option value="1">1 колонка</option><option value="2">2 колонки</option><option value="3">3 колонки</option></select>
-    <select id="t-theme"><option value="dark">Тёмная тема</option><option value="light">Светлая тема</option></select></div>
+    <select id="t-theme"><option value="dark">Тёмная тема</option><option value="light">Светлая тема</option><option value="auto">Авто (день/ночь)</option></select></div>
     <div id="t-widgets" style="margin:8px 0"></div>
     <div class="row"><button onclick="saveTpl()">Сохранить</button><button class="gray" onclick="newTpl()">Новый</button>
     <button class="gray" onclick="previewTpl()">Предпросмотр</button><button class="red" onclick="delTpl()">Удалить</button></div>
@@ -63,12 +65,20 @@
     <div id="static"></div>
   </section>
 
+  <section>
+    <h2>🔌 Внешние источники</h2>
+    <input id="s-rss_url" type="text" placeholder="RSS-лента (URL)">
+    <div class="row"><input id="s-weather_city" type="text" placeholder="Город"><input id="s-weather_lat" type="text" placeholder="Широта"><input id="s-weather_lon" type="text" placeholder="Долгота"></div>
+    <input id="s-camera_url" type="text" placeholder="Камера: URL MJPEG-потока" style="margin-top:8px">
+    <button onclick="saveSettings()">Сохранить источники</button>
+  </section>
+
   <section style="grid-column:1/-1"><h2>🧾 Аудит (последние действия)</h2><div id="audit"></div></section>
 </main>
 <div id="toast"></div>
 <script>
-const WIDGETS = {clock:'Часы', news:'Новости', parking:'Парковки/кладовые', rules:'Правила ЖК', trash:'Вывоз мусора', contacts:'Аварийные службы', camera:'Камера'};
-let D = {displays:[], templates:[], static:[], audit:[]}, selScreens = new Set(), selTpl = null;
+const WIDGETS = {clock:'Часы', news:'Новости', parking:'Парковки/кладовые', rules:'Правила ЖК', trash:'Вывоз мусора', contacts:'Аварийные службы', camera:'Камера', rss:'Новости города (RSS)', weather:'Погода'};
+let D = {displays:[], templates:[], static:[], audit:[], settings:{}}, selScreens = new Set(), selTpl = null;
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 $('token').value = localStorage.getItem('uk_token') || '';
@@ -91,21 +101,44 @@ function target() {
 }
 $('tmode').onchange = () => $('tgroup').style.display = $('tmode').value === 'group' ? '' : 'none';
 
-async function load() {
-  D = await api('GET', '/api/v1/uk/dashboard');
+function renderScreens() {
   const groups = [...new Set(D.displays.map(d => d.group_name))];
   const cur = $('tgroup').value; $('tgroup').innerHTML = groups.map(g => `<option>${esc(g)}</option>`).join(''); if (cur) $('tgroup').value = cur;
   $('screens').innerHTML = D.displays.map(d => `<tr>
     <td><input type="checkbox" ${selScreens.has(d.id) ? 'checked' : ''} onchange="togScreen('${d.id}',this.checked)"></td>
     <td><span class="dot ${d.online ? 'on' : ''}"></span>${esc(d.location)}<br><small>${esc(d.id)}</small>
         ${d.is_emergency && d.emergency_text ? ' <span class="badge">ЧС</span>' : ''}</td>
-    <td>${esc(d.group_name)}</td><td>${esc((D.templates.find(t => t.id === d.template_id) || {}).name || '—')}</td></tr>`).join('');
+    <td>${esc(d.group_name)}</td><td>${esc((D.templates.find(t => t.id === d.template_id) || {}).name || '—')}</td>
+    <td style="white-space:nowrap"><button class="gray" onclick="editScreen('${d.id}')">✎</button> <button class="red" onclick="delScreen('${d.id}')">✕</button></td></tr>`).join('');
+  $('audit').innerHTML = D.audit.map(a => `<div>${esc(a.ts)} · ${esc(a.actor)} · <b>${esc(a.action)}</b> → ${esc(a.targets)} ${esc(a.text)}</div>`).join('') || '—';
+}
+// full=false — только экраны и аудит (форма шаблона и поля ввода не сбрасываются)
+async function load(full = true) {
+  D = await api('GET', '/api/v1/uk/dashboard');
+  renderScreens();
+  if (!full) return;
   $('tpls').innerHTML = D.templates.map(t => `<div class="tpl ${t.id === selTpl ? 'sel' : ''}" onclick="pickTpl(${t.id})">${esc(t.name)} <small>· ${t.columns_count} кол. · ${t.theme}</small></div>`).join('');
   $('t-widgets').innerHTML = Object.entries(WIDGETS).map(([k, v]) => `<label class="chk"><input type="checkbox" value="${k}">${v}</label>`).join('');
   fillTpl();
   $('static').innerHTML = D.static.map(s => `<b>${esc(s.title)}</b><textarea id="st-${s.key}" rows="3">${esc(s.body)}</textarea>
     <button onclick="saveStatic('${s.key}')" style="margin-bottom:12px">Сохранить</button>`).join('');
-  $('audit').innerHTML = D.audit.map(a => `<div>${esc(a.ts)} · ${esc(a.actor)} · <b>${esc(a.action)}</b> → ${esc(a.targets)} ${esc(a.text)}</div>`).join('') || '—';
+  ['rss_url', 'weather_city', 'weather_lat', 'weather_lon', 'camera_url'].forEach(k => $('s-' + k).value = D.settings[k] || '');
+}
+async function addScreen() {
+  const id = $('sc-id').value.trim(); if (!id) return toast('Введите ID экрана');
+  await api('POST', '/api/v1/uk/displays', {id, location:$('sc-loc').value.trim(), group_name:$('sc-group').value.trim() || 'unassigned'});
+  ['sc-id', 'sc-loc', 'sc-group'].forEach(i => $(i).value = ''); toast('Экран добавлен'); load(false);
+}
+async function editScreen(id) {
+  const d = D.displays.find(x => x.id === id);
+  const loc = prompt('Расположение:', d.location); if (loc === null) return;
+  const grp = prompt('Группа:', d.group_name); if (grp === null) return;
+  await api('PUT', '/api/v1/uk/displays/' + id, {location:loc, group_name:grp || 'unassigned'}); load(false);
+}
+async function delScreen(id) { if (!confirm('Удалить экран ' + id + '?')) return; selScreens.delete(id); await api('DELETE', '/api/v1/uk/displays/' + id); load(false); }
+async function saveSettings() {
+  const b = {}; ['rss_url', 'weather_city', 'weather_lat', 'weather_lon', 'camera_url'].forEach(k => b[k] = $('s-' + k).value.trim());
+  await api('PUT', '/api/v1/uk/settings', b); toast('Источники сохранены'); load(false);
 }
 function togScreen(id, on) { on ? selScreens.add(id) : selScreens.delete(id); }
 
@@ -124,15 +157,15 @@ async function saveTpl() {
 }
 async function delTpl() { if (!selTpl || !confirm('Удалить шаблон?')) return; await api('DELETE', '/api/v1/uk/templates/' + selTpl); selTpl = null; toast('Удалён'); load(); }
 function previewTpl() { if (!selTpl) return toast('Выберите шаблон (сохраните его перед предпросмотром)'); window.open('/preview?tpl=' + selTpl, '_blank', 'width=460,height=860'); }
-async function sendTpl() { if (!selTpl) return toast('Выберите шаблон'); const r = await api('POST', '/api/v1/uk/screens/assign', {...target(), template_id:selTpl}); toast('Отправлено: ' + r.targets.length + ' экр.'); load(); }
+async function sendTpl() { if (!selTpl) return toast('Выберите шаблон'); const r = await api('POST', '/api/v1/uk/screens/assign', {...target(), template_id:selTpl}); toast('Отправлено: ' + r.targets.length + ' экр.'); load(false); }
 
 async function emergency(on) {
   if (on && !$('em-text').value.trim()) return toast('Введите текст');
   const r = on ? await api('POST', '/api/v1/uk/emergency/activate', {...target(), emergency_text:$('em-text').value, timeout_minutes:+$('em-timeout').value})
                : await api('POST', '/api/v1/uk/emergency/reset', target());
-  toast((on ? 'ЧС активирован: ' : 'ЧС сброшен: ') + r.targets.length + ' экр.'); load();
+  toast((on ? 'ЧС активирован: ' : 'ЧС сброшен: ') + r.targets.length + ' экр.'); load(false);
 }
-async function saveStatic(k) { await api('PUT', '/api/v1/uk/static/' + k, {body:$('st-' + k).value}); toast('Сохранено'); load(); }
+async function saveStatic(k) { await api('PUT', '/api/v1/uk/static/' + k, {body:$('st-' + k).value}); toast('Сохранено'); load(false); }
 
-load(); setInterval(load, 10000);
+load(); setInterval(() => load(false), 10000);
 </script></body></html>

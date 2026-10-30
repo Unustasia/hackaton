@@ -55,6 +55,11 @@ const widgets = {
   camera: s => `<div class="w"><h2>📹 Камера</h2>${s.data.camera_url
       ? `<img class="cam" src="${esc(s.data.camera_url)}">` : '<div class="cam">Нет сигнала</div>'}</div>`,
 };
+widgets.weather = s => { const w = s.data.weather;
+  return `<div class="w"><h2>⛅ Погода${s.data.weather_city ? ' · ' + esc(s.data.weather_city) : ''}</h2>` +
+    (w ? `<div class="num">${esc(w.temp)}°<small>${esc(w.desc)}, ветер ${esc(w.wind)} км/ч</small></div>` : '<span class="txt">Нет данных</span>') + '</div>'; };
+widgets.rss = s => `<div class="w"><h2>📰 Новости города</h2>` +
+  ((s.data.rss || []).map(n => `<div class="news-item"><span>${esc(n.title)}</span></div>`).join('') || '<span class="txt">Нет данных</span>') + '</div>';
 ['rules', 'trash', 'contacts'].forEach(k => widgets[k] = s => {
   const c = (s.static || {})[k]; return c ? `<div class="w"><h2>${esc(c.title)}</h2><div class="txt">${esc(c.body)}</div></div>` : '';
 });
@@ -91,7 +96,9 @@ function applyEmergency(text) {
 function render(s) {
   state = s;
   const t = s.template;
-  document.body.className = t.theme === 'light' ? 'light' : '';
+  const hour = new Date().getHours();
+  const th = t.theme === 'auto' ? (hour >= 7 && hour < 20 ? 'light' : 'dark') : t.theme;  // авто: день/ночь
+  document.body.className = th === 'light' ? 'light' : '';
   const [time, date] = clockText();
   const cols = Math.max(1, Math.min(3, t.columns_count || 1));
   inner.innerHTML = `<div class="head" id="clk"><span class="clock">${time}</span><span class="date">${date}</span></div>
@@ -109,7 +116,7 @@ if (previewId) {                                   // режим предпро�
   (function connect() {
     const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws/display/' + displayId);
     ws.onmessage = e => { const m = JSON.parse(e.data); if (m.event === 'STATE') render(m); };
-    ws.onclose = () => setTimeout(connect, 3000);  // авто-переподключение
+    ws.onclose = e => { if (e.code === 4000) { inner.innerHTML = '<h2 style="padding:4vh">Экран удалён в панели УК</h2>'; return; } setTimeout(connect, 3000); };  // авто-переподключение
   })();
 }
 </script>

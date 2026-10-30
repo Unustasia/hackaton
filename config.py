@@ -1,20 +1,28 @@
-import os
 from pathlib import Path
 from pydantic_settings import BaseSettings
 
-# Автоматически определяет корень проекта на любой ОС
 BASE_DIR = Path(__file__).resolve().parent
+
 
 class Settings(BaseSettings):
     PORT: int = 8000
     HOST: str = "0.0.0.0"
-    DEBUG_MODE: bool = True
-    
-    # Кроссплатформенный путь к БД (работает и на Windows, и на Linux)
     DB_PATH: str = str(BASE_DIR / "ujin_displays.db")
+    # Ujin (токен и url выдают организаторы)
+    UJIN_BASE_URL: str = "https://hck-api.unicorn.icu"
+    # Пути методов Ujin (поправьте по Open API.yaml прямо в .env, код менять не нужно)
+    UJIN_NEWS_PATH: str = "/api/v1/news/list"
+    UJIN_PARKING_PATH: str = "/api/v1/parking/list"
+    UJIN_STORAGE_PATH: str = "/api/v1/storage/list"
+    UJIN_TOKEN: str = ""          # пусто -> сразу работаем на fallback.json
+    # Токен сотрудника УК для панели. Пусто -> демо-режим без проверки
+    UK_TOKEN: str = ""
+    CAMERA_URL: str = ""          # MJPEG-поток для виджета камеры (необязательно)
+    EMERGENCY_DEFAULT_TIMEOUT_MIN: int = 30
 
     class Config:
         env_file = ".env"
         extra = "ignore"
+
 
 settings = Settings()
